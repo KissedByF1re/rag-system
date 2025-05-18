@@ -1,0 +1,137 @@
+services:
+  bread-agent-service:
+    container_name: bread-service
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.service
+    ports:
+      - "8081:8080"
+    env_file:
+      - .env
+    environment:
+      - PHOENIX_ENABLED=true
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - MODE=development
+      - DEV_MODE=true
+      - WATCHFILES_FORCE_POLLING=true
+      - WATCHFILES_POLL_INTERVAL=500
+      - POSTGRES_HOST=bread-postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=agent_service
+      - SEARCH_DB=${SEARCH_DB}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://bread-phoenix:4317
+      - OTEL_SERVICE_NAME=bread-agent-service
+    volumes:
+      - ./data:/app/data
+      - ./src/agents:/app/agents
+      - ./src/schema:/app/schema
+      - ./src/service:/app/service
+      - ./src/core:/app/core
+      - ./src/memory:/app/memory
+      - ./src/run_service.py:/app/run_service.py
+      - ./scripts:/app/scripts
+    develop:
+      watch:
+        - path: src/agents/
+          action: sync
+          target: /app/agents/
+        - path: src/schema/
+          action: sync
+          target: /app/schema/
+        - path: src/service/
+          action: sync
+          target: /app/service/
+        - path: src/core/
+          action: sync
+          target: /app/core/
+        - path: src/memory/
+          action: sync
+          target: /app/memory/
+        - path: src/run_service.py
+          action: sync
+          target: /app/run_service.py
+    depends_on:
+      bread-postgres:
+        condition: service_healthy
+      # Wait for Phoenix to start but don't make it a hard dependency
+      # as the app can still function without Phoenix
+      bread-phoenix:
+        condition: service_started
+
+  bread-streamlit-app:
+    container_name: bread-streamlit
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.app
+    ports:
+      - "8502:8501"
+    depends_on:
+      - bread-agent-service
+      - bread-phoenix
+    environment:
+      - AGENT_URL=http://bread-agent-service:8080
+      - PHOENIX_HOST=http://bread-phoenix:6006
+      - DEV_MODE=true
+      - STREAMLIT_SERVER_ENABLE_STATIC_SERVING=true
+      - STREAMLIT_SERVER_RUN_ON_SAVE=true
+      - STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
+      - STREAMLIT_DEBUG=true
+    volumes:
+      - ./src/client:/app/client
+      - ./src/schema:/app/schema
+      - ./src/streamlit_app.py:/app/streamlit_app.py
+      - ./.streamlit:/app/.streamlit
+    develop:
+      watch:
+        - path: src/client/
+          action: sync+restart
+          target: /app/client/
+        - path: src/schema/
+          action: sync+restart
+          target: /app/schema/
+        - path: src/streamlit_app.py
+          action: sync+restart
+          target: /app/streamlit_app.py
+
+  bread-phoenix:
+    container_name: bread-phoenix
+    image: arizephoenix/phoenix:latest
+    ports:
+      - "8881:6006"  # Phoenix UI and HTTP collector
+      - "6001:4317"  # OTLP gRPC collector
+    volumes:
+      - bread-phoenix-data:/mnt/data
+    environment:
+      - PHOENIX_WORKING_DIR=/mnt/data
+      - PHOENIX_DEV_MODE=true
+      - PHOENIX_HOST=0.0.0.0
+    healthcheck:
+      # Use netcat (nc) which is more likely to be available in the container
+      test: ["CMD-SHELL", "nc -z localhost 6006 || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+  
+  bread-postgres:
+    container_name: bread-postgres
+    image: postgres:15
+    ports:
+      - "5440:5432"
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=agent_service
+    volumes:
+      - bread-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  bread-postgres-data:
+  bread-phoenix-data:

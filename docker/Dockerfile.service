@@ -1,0 +1,43 @@
+FROM python:3.12.3-slim
+
+WORKDIR /app
+
+# Install PostgreSQL client libraries and other necessary tools
+RUN apt-get update && apt-get install -y \
+    libpq-dev gcc curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install dependencies directly with pip
+COPY pyproject.toml .
+RUN pip install --no-cache-dir -e .
+
+# Install the complete Phoenix package (instead of just the client)
+RUN pip install --no-cache-dir arize-phoenix opentelemetry-sdk opentelemetry-exporter-otlp openinference-instrumentation-langchain
+
+# Install OpenSearch MCP dependencies
+RUN pip install --no-cache-dir fastmcp opensearch-py python-dotenv mcp
+
+# Install watchdog packages for better file monitoring and hot reload
+RUN pip install --no-cache-dir uvicorn[standard] watchdog watchdog[watchmedo] watchfiles
+
+# Copy application code
+COPY src/agents/ ./agents/
+COPY src/core/ ./core/
+COPY src/memory/ ./memory/
+COPY src/schema/ ./schema/
+COPY src/service/ ./service/
+COPY src/run_service.py .
+
+# Copy the script to create ChromaDB
+COPY scripts/create_chroma_db.py ./scripts/
+
+# Copy the test dataset for ChromaDB
+COPY data/ru_rag_test_dataset-main /app/data/ru_rag_test_dataset-main
+
+# Copy and make entrypoint script executable
+COPY docker/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+# Use the entrypoint script
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["run_service.py"]
