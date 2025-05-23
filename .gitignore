@@ -17,3 +17,7 @@ src/agents/__pycache__/utils.cpython-312.pyc
 # Large database files
 data/chroma_db/*.bin
 data/chroma_db/*.sqlite3
+
+.venv
+venv
+.env
