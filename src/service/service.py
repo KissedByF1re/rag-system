@@ -195,10 +195,195 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             for a in agents:
                 agent = get_agent(a.key)
                 agent.checkpointer = saver
+            
+            # Configure Phoenix retention policy after service initialization
+            if PHOENIX_ENABLED:
+                try:
+                    await configure_phoenix_retention()
+                except Exception as e:
+                    logger.warning(f"Failed to configure Phoenix retention on startup: {e}")
+            
             yield
     except Exception as e:
         logger.error(f"Error during database initialization: {e}")
         raise
+
+
+async def configure_phoenix_retention():
+    """Configure Phoenix retention policy via GraphQL API."""
+    if not PHOENIX_ENABLED or not phoenix_client:
+        return
+    
+    try:
+        phoenix_host = os.getenv("PHOENIX_HOST", "bread-phoenix")
+        phoenix_port = os.getenv("PHOENIX_PORT", "6006")
+        phoenix_url = f"http://{phoenix_host}:{phoenix_port}"
+        
+        logger.info("🔧 Phoenix Retention Policy Configuration")
+        
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            # Check if Phoenix is accessible
+            try:
+                health_response = await client.get(f"{phoenix_url}/health")
+                if health_response.status_code == 200:
+                    logger.info(f"✅ Phoenix is running and accessible at {phoenix_url}")
+                else:
+                    logger.warning(f"⚠️ Phoenix health check failed: {health_response.status_code}")
+                    return
+            except Exception as e:
+                logger.warning(f"⚠️ Phoenix not accessible: {e}")
+                return
+            
+            # Get current projects and their retention policies
+            try:
+                projects_query = {
+                    "query": """
+                    query {
+                        projects {
+                            edges {
+                                node {
+                                    id
+                                    name
+                                    traceRetentionPolicy {
+                                        id
+                                        name
+                                        rule {
+                                            ... on TraceRetentionRuleMaxDays {
+                                                maxDays
+                                            }
+                                            ... on TraceRetentionRuleMaxCount {
+                                                maxCount
+                                            }
+                                            ... on TraceRetentionRuleMaxDaysOrCount {
+                                                maxDays
+                                                maxCount
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    """
+                }
+                
+                projects_response = await client.post(
+                    f"{phoenix_url}/graphql",
+                    json=projects_query,
+                    headers={"Content-Type": "application/json"}
+                )
+                
+                if projects_response.status_code == 200:
+                    projects_data = projects_response.json()
+                    if "data" in projects_data and projects_data["data"]["projects"]:
+                        projects = projects_data["data"]["projects"]["edges"]
+                        logger.info(f"📊 Found {len(projects)} Phoenix project(s)")
+                        
+                        for project_edge in projects:
+                            project = project_edge["node"]
+                            retention_policy = project["traceRetentionPolicy"]
+                            current_rule = retention_policy["rule"]
+                            
+                            logger.info(f"   • Project: {project['name']} (ID: {project['id']})")
+                            logger.info(f"     Retention Policy: {retention_policy['name']} (ID: {retention_policy['id']})")
+                            
+                            # Check current retention rule
+                            if "maxCount" in current_rule:
+                                if current_rule.get("maxCount") == 10000:
+                                    logger.info(f"     ✅ Already configured for 10k traces (current: {current_rule['maxCount']})")
+                                    continue
+                                else:
+                                    logger.info(f"     Current: {current_rule['maxCount']} traces")
+                            elif "maxDays" in current_rule:
+                                logger.info(f"     Current: {current_rule['maxDays']} days retention")
+                            else:
+                                logger.info(f"     Current rule: {current_rule}")
+                            
+                            logger.info(f"🚀 Updating retention policy to 10k traces for project: {project['name']}")
+                            
+                            # Update retention policy using the working GraphQL mutation
+                            update_policy_mutation = {
+                                "query": """
+                                mutation UpdateRetentionPolicy($id: ID!, $rule: ProjectTraceRetentionRuleInput!) {
+                                    patchProjectTraceRetentionPolicy(input: {
+                                        id: $id,
+                                        rule: $rule
+                                    }) {
+                                        node {
+                                            id
+                                            name
+                                            rule {
+                                                ... on TraceRetentionRuleMaxDaysOrCount {
+                                                    maxDays
+                                                    maxCount
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                """,
+                                "variables": {
+                                    "id": retention_policy["id"],
+                                    "rule": {
+                                        "maxDaysOrCount": {
+                                            "maxDays": 0.0,
+                                            "maxCount": 10000
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            mutation_response = await client.post(
+                                f"{phoenix_url}/graphql",
+                                json=update_policy_mutation,
+                                headers={"Content-Type": "application/json"}
+                            )
+                            
+                            if mutation_response.status_code == 200:
+                                mutation_data = mutation_response.json()
+                                
+                                if "errors" in mutation_data and mutation_data["errors"]:
+                                    error_msg = mutation_data["errors"][0].get("message", "Unknown error")
+                                    logger.warning(f"⚠️ GraphQL error updating retention policy: {error_msg}")
+                                elif "data" in mutation_data and mutation_data["data"]:
+                                    policy_data = mutation_data["data"]["patchProjectTraceRetentionPolicy"]["node"]
+                                    rule_data = policy_data["rule"]
+                                    logger.info(f"✅ Successfully updated retention policy:")
+                                    logger.info(f"   • Policy: {policy_data['name']} (ID: {policy_data['id']})")
+                                    logger.info(f"   • Max Traces: {rule_data['maxCount']}")
+                                    logger.info(f"   • Max Days: {rule_data['maxDays']} (unlimited)")
+                                    logger.info(f"   🎯 Phoenix will now retain up to 10,000 traces!")
+                                else:
+                                    logger.warning(f"⚠️ Unexpected GraphQL response: {mutation_data}")
+                            else:
+                                logger.warning(f"⚠️ GraphQL mutation failed: {mutation_response.status_code}")
+                                try:
+                                    error_detail = mutation_response.text
+                                    logger.warning(f"Error detail: {error_detail}")
+                                except:
+                                    pass
+                        
+                        logger.info("🎯 Phoenix retention configuration completed")
+                        
+                    else:
+                        logger.warning("⚠️ No projects found in Phoenix")
+                        
+                else:
+                    logger.warning(f"⚠️ Failed to query Phoenix projects: {projects_response.status_code}")
+                
+            except Exception as api_error:
+                logger.warning(f"ℹ️ Phoenix GraphQL API error: {api_error}")
+                logger.info("💡 Manual Configuration Alternative:")
+                logger.info(f"   1. Visit Phoenix UI: {phoenix_url}")
+                logger.info("   2. Go to Settings → Data Retention")
+                logger.info("   3. Update policy: Max Traces=10000, Max Days=0")
+                
+    except Exception as e:
+        logger.warning(f"ℹ️ Phoenix retention configuration error: {e}")
+        logger.info("💡 For manual configuration:")
+        logger.info("   • Open Phoenix UI at http://localhost:8881")
+        logger.info("   • Navigate to Settings → Data Retention") 
+        logger.info("   • Update Default policy: Max Traces=10000, Max Days=0")
 
 
 app = FastAPI(lifespan=lifespan)

@@ -107,6 +107,10 @@ services:
       - PHOENIX_WORKING_DIR=/mnt/data
       - PHOENIX_DEV_MODE=true
       - PHOENIX_HOST=0.0.0.0
+      # Configure retention to keep up to 10k traces
+      - PHOENIX_SQL_DATABASE_URL=sqlite:////mnt/data/phoenix.db
+      # Enable Prometheus metrics for monitoring
+      - PHOENIX_ENABLE_PROMETHEUS=false
     healthcheck:
       # Use netcat (nc) which is more likely to be available in the container
       test: ["CMD-SHELL", "nc -z localhost 6006 || exit 1"]
