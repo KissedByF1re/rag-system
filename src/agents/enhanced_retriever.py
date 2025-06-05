@@ -36,53 +36,15 @@ class EnhancedRetriever:
             collection_name=collection_name
         )
         
-    def expand_query(self, query: str) -> List[str]:
-        """Expand query with variations and synonyms."""
-        expanded_queries = [query]
-        
-        # Add linguistic variations for Russian
-        if "президент" in query.lower():
-            expanded_queries.append(query.replace("президент", "глава государства"))
-            expanded_queries.append(query.replace("президент", "лидер"))
-        if "премьер-министр" in query.lower():
-            expanded_queries.append(query.replace("премьер-министр", "глава правительства"))
-            expanded_queries.append(query.replace("премьер-министр", "председатель правительства"))
-            
-        # Add question variations
-        if not any(word in query.lower() for word in ["кто", "что", "где", "когда", "как"]):
-            expanded_queries.append(f"Кто {query}")
-            expanded_queries.append(f"Что такое {query}")
-            
-        # Add country name extraction and focus
-        countries = {
-            "испании": "Испания", "испанский": "Испания", "мадрид": "Испания",
-            "италии": "Италия", "итальянский": "Италия", "рим": "Италия",
-            "россии": "Россия", "российский": "Россия", "москва": "Россия",
-            "франции": "Франция", "французский": "Франция", "париж": "Франция"
-        }
-        
-        query_lower = query.lower()
-        for indicator, country in countries.items():
-            if indicator in query_lower:
-                expanded_queries.append(f"{country} {query}")
-                expanded_queries.append(f"{query} в {country}")
-                break
-            
-        return list(set(expanded_queries))  # Remove duplicates
-    
     def hybrid_search(self, query: str, k: int = None) -> List[tuple]:
         """Perform hybrid search with query expansion."""
         if k is None:
             k = self.base_k
             
-        # Expand query
-        expanded_queries = self.expand_query(query)
-        logger.info(f"Expanded queries: {expanded_queries}")
-        
         # Collect all results with scores
         all_results = {}
         
-        for exp_query in expanded_queries:
+        for exp_query in [query]:
             # Vector search with scores
             vector_results = self.db.similarity_search_with_score(exp_query, k=k)
             
@@ -104,7 +66,7 @@ class EnhancedRetriever:
         for doc_id, info in all_results.items():
             # Average score with boost for multiple matches
             avg_score = np.mean(info['scores'])
-            match_boost = min(len(info['queries']) / len(expanded_queries), 1.0)
+            match_boost = min(len(info['queries']) / len([query]), 1.0)
             combined_score = avg_score * (1 + match_boost * 0.5)
             
             combined_results.append((info['doc'], combined_score))
