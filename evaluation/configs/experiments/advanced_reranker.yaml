@@ -1,0 +1,47 @@
+experiment:
+  name: "advanced_reranker"
+  description: "Advanced RAG with reranking for maximum relevance"
+  
+  data:
+    source: "hybrid"
+    path: "hybrid_loader_auto"
+    loader: "hybrid_loader"
+  
+  chunking:
+    strategy: "recursive"
+    chunk_size: 800
+    chunk_overlap: 128
+  
+  embedding:
+    provider: "openai"
+    model: "text-embedding-3-large"
+    dimension: 3072
+  
+  vectorstore:
+    type: "chroma"
+    collection_name: "advanced_reranker"
+    persist_directory: "./chroma_db/advanced_reranker"
+  
+  retriever:
+    type: "vector"
+    k: 5
+    rerank: true
+  
+  llm:
+    provider: "openai"
+    model: "gpt-4.1-nano"
+    temperature: 0.0
+    max_tokens: 400
+  
+  rag_chain:
+    type: "vanilla"
+    prompt_template: "russian_qa"
+  
+  evaluation:
+    metrics: ["faithfulness", "answer_relevancy", "context_precision", "context_recall"]
+    sample_size: 100
+    evaluator: "improved_ragas"
+  
+  output:
+    results_dir: "./results/experiments"
+    format: "json"

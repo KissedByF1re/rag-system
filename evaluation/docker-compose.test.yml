@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  # Component testing service
+  component-test:
+    build: .
+    container_name: rag-component-test
+    volumes:
+      - ./scripts:/app/scripts
+      - ./test-results:/app/test-results
+    env_file:
+      - .env.test
+    environment:
+      - PYTHONUNBUFFERED=1
+    command: python scripts/test_components.py
+    
+  # Unit test runner
+  unit-test:
+    build: 
+      context: .
+      dockerfile: Dockerfile.test
+    container_name: rag-unit-test
+    volumes:
+      - ./tests:/app/tests
+      - ./test-results:/app/test-results
+    env_file:
+      - .env.test
+    environment:
+      - PYTHONUNBUFFERED=1
+    command: pytest tests/unit -v --html=test-results/unit-test-report.html
+    
+  # Integration test runner (requires real API keys)
+  integration-test:
+    build: 
+      context: .
+      dockerfile: Dockerfile.test
+    container_name: rag-integration-test
+    volumes:
+      - ./tests:/app/tests
+      - ./data:/app/data
+      - ./test-results:/app/test-results
+    env_file:
+      - .env  # Uses real API keys
+    environment:
+      - PYTHONUNBUFFERED=1
+    command: pytest tests/integration -v --integration --html=test-results/integration-test-report.html

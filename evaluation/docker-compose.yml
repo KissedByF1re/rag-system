@@ -1,0 +1,77 @@
+version: '3.8'
+
+services:
+  rag-platform:
+    build: 
+      context: .
+      dockerfile: docker/Dockerfile.simple
+    container_name: rag-platform
+    volumes:
+      - ./data:/app/data
+      - ./configs:/app/configs
+      - ./results:/app/results
+      - ./chroma_db:/app/chroma_db
+    env_file:
+      - .env
+    environment:
+      - PYTHONUNBUFFERED=1
+    networks:
+      - rag-network
+    command: tail -f /dev/null  # Keep container running
+
+  # ChromaDB standalone service (optional)
+  chromadb:
+    image: chromadb/chroma:latest
+    container_name: chromadb
+    ports:
+      - "8000:8000"
+    volumes:
+      - chromadb_data:/chroma/chroma
+    environment:
+      - IS_PERSISTENT=TRUE
+      - ANONYMIZED_TELEMETRY=FALSE
+    networks:
+      - rag-network
+
+  # MLflow tracking server (optional)
+  mlflow:
+    image: python:3.9-slim
+    container_name: mlflow
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./mlruns:/mlruns
+    environment:
+      - MLFLOW_BACKEND_STORE_URI=file:///mlruns
+    command: >
+      sh -c "pip install mlflow && 
+             mlflow server --host 0.0.0.0 --port 5000 
+             --backend-store-uri file:///mlruns 
+             --default-artifact-root file:///mlruns"
+    networks:
+      - rag-network
+
+  # Test runner service
+  test-runner:
+    build: 
+      context: .
+      dockerfile: docker/Dockerfile.test
+    container_name: rag-test-runner
+    volumes:
+      - ./tests:/app/tests
+      - ./test-results:/app/test-results
+    env_file:
+      - .env.test
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PYTEST_ADDOPTS=-v
+    networks:
+      - rag-network
+    command: pytest
+
+networks:
+  rag-network:
+    driver: bridge
+
+volumes:
+  chromadb_data:

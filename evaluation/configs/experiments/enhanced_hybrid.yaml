@@ -1,0 +1,47 @@
+experiment:
+  name: "enhanced_hybrid"
+  description: "Enhanced RAG with hybrid retrieval combining vector and keyword search"
+  
+  data:
+    source: "hybrid"
+    path: "hybrid_loader_auto"
+    loader: "hybrid_loader"
+  
+  chunking:
+    strategy: "sentence"
+    chunk_size: 350
+    chunk_overlap: 50
+  
+  embedding:
+    provider: "openai"
+    model: "text-embedding-3-small"
+    dimension: 1536
+  
+  vectorstore:
+    type: "chroma"
+    collection_name: "enhanced_hybrid"
+    persist_directory: "./chroma_db/enhanced_hybrid"
+  
+  retriever:
+    type: "vector"
+    k: 5
+    rerank: false
+  
+  llm:
+    provider: "openai"
+    model: "gpt-4.1-nano"
+    temperature: 0.0
+    max_tokens: 400
+  
+  rag_chain:
+    type: "vanilla"
+    prompt_template: "russian_qa"
+  
+  evaluation:
+    metrics: ["faithfulness", "answer_relevancy", "context_precision", "context_recall"]
+    sample_size: 100
+    evaluator: "improved_ragas"
+  
+  output:
+    results_dir: "./results/experiments"
+    format: "json"

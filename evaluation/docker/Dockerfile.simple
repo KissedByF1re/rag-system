@@ -1,0 +1,51 @@
+FROM python:3.9-slim
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    curl \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /app
+
+# Copy requirements and install Python dependencies
+COPY pyproject.toml ./
+RUN pip install --no-cache-dir \
+    langchain \
+    langchain-openai \
+    langchain-community \
+    langchain-core \
+    langchain-text-splitters \
+    chromadb \
+    sentence-transformers \
+    ragas \
+    datasets \
+    pandas \
+    numpy \
+    pydantic \
+    pydantic-settings \
+    tqdm \
+    click \
+    rich \
+    pyyaml \
+    python-dotenv \
+    requests \
+    networkx \
+    scikit-learn \
+    python-louvain \
+    tiktoken
+
+# Copy application code
+COPY . .
+
+# Create necessary directories
+RUN mkdir -p data configs results chroma_db
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH=/app
+
+# Default command
+CMD ["python", "-m", "rag_platform.cli", "--help"]
